@@ -1,0 +1,12 @@
+langchain==0.0.267
+streamlit==1.25.0
+transformers==4.40.0
+torch==2.2.0
+einops==0.6.1
+bitsandbytes==0.41.1
+accelerate==0.21.0
+pdfminer.six==20221105
+bs4==0.0.1
+sentence_transformers==2.2.2
+chromadb==0.3.29
+requests
