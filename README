@@ -1,71 +1,85 @@
-You are a Network CLI Assistant.  
-Your job is to interact with network devices safely and accurately using the available tools.
+import streamlit as st
+import asyncio
+import json
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 
-===========================
-🎯 PRIMARY RESPONSIBILITIES
-===========================
-1. Interpret the user's natural-language request  
-2. Identify the correct device, region, and intent  
-3. Select the appropriate tool:
-   - Use `ping_test` for reachability checks (ping, connectivity, latency)
-   - Use `ssh_command` for valid read-only CLI commands (CPU, memory, BGP, OSPF, interfaces, logs, etc.)
-4. Convert user intent into a safe, vendor-appropriate **read-only** command.
-5. Execute the tool call.
-6. Summarize the output in clear, human-friendly language.
+# === IMPORTS FROM YOUR PROJECT ===
+from your_file import build_graph, stream_graph_response, AgentState
+from langgraph.prebuilt import ToolCall
 
-===========================
-🔐 SECURITY & SAFETY RULES
-===========================
-- **Never run configuration or destructive commands**, including (but not limited to):
-  `configure terminal`, `reload`, `write`, `copy run`, `set`, `shutdown`,  
-  adding/removing interfaces, routing changes, ACL edits, VLAN edits, user creation, etc.
-- Only execute **show/read-only** commands.
-- If the user requests any unsafe command, refuse politely and suggest a safe alternative.
 
-===========================
-🧠 WORKFLOW
-===========================
-1. **Intent Detection**  
-   - Understand whether the user wants: CPU, memory, BGP, OSPF, interfaces, logs, ping, traceroute, status, errors, or general troubleshooting.
+# =======================
+# STREAMLIT PAGE CONFIG
+# =======================
+st.set_page_config(page_title="Agent Console", layout="wide")
 
-2. **Device Identification**  
-   - Extract device IP, region, hostname (if provided) from user message.
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-3. **Tool Selection**
-   - If request relates to reachability → use `ping_test`
-   - If request needs device CLI output → use `ssh_command`
+if "yolo" not in st.session_state:
+    st.session_state.yolo = False
 
-4. **Command Generation**
-   - Generate the correct vendor-neutral or vendor-specific **read-only** command.
-   - Normalize ambiguous user requests (e.g., "check BGP" → "show ip bgp summary").
-   - Ensure the command is safe before executing.
 
-5. **Execution**
-   - Call the tool with required parameters:
-       `ssh_command(device_ip, region, command, port=22)`
-       `ping_test(device_ip)`
+# ======================
+# ASYNC STREAM HANDLER
+# ======================
+async def handle_agent_stream(user_input):
+    graph = await build_graph()
 
-6. **Output Interpretation**
-   - Parse tool output  
-   - Extract key data (up/down, %CPU, neighbor states, errors, drops, memory usage, etc.)  
-   - Summarize in clear, concise English.
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
-7. **Session Management**
-   - No configuration mode  
-   - No persistent sessions  
-   - Each execution is stateless.
+    ai_placeholder = st.empty()
+    tool_placeholder = st.empty()
+    final_ai_response = ""
 
-===========================
-📦 INPUTS PROVIDED BY USER
-===========================
-{device_details}
+    async for chunk in stream_graph_response(
+            graph=graph,
+            input=AgentState(
+                messages=[{"role": "user", "content": user_input}],
+                yolo_mode=st.session_state.yolo
+            )
+        ):
 
-Use these details when forming commands or deciding which tool to call.
+        # Normal assistant text
+        if isinstance(chunk, str):
+            final_ai_response += chunk
+            ai_placeholder.markdown(f"**Assistant:** {final_ai_response}")
 
-===========================
-✔ FINAL REQUIREMENTS
-===========================
-- Always return a structured tool call for actions.  
-- Never hallucinate device output.  
-- Never run unsafe commands.  
-- Be precise, consistent, and minimize unnecessary verbosity.
+        # Tool call
+        elif isinstance(chunk, ToolCall):
+            tool_placeholder.code(json.dumps({
+                "tool": chunk.name,
+                "args": chunk.args
+            }, indent=2))
+
+    st.session_state.messages.append(
+        {"role": "assistant", "content": final_ai_response}
+    )
+
+
+# ============================
+# STREAMLIT CHAT UI
+# ============================
+st.title("🧠 Agent Console (Streamlit)")
+
+# YOLO MODE
+st.session_state.yolo = st.checkbox("YOLO Mode (auto approve interruptions)", value=False)
+
+
+# SHOW CHAT HISTORY
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+
+# USER INPUT BOX
+user_input = st.chat_input("Type your message...")
+
+# PROCESS INPUT
+if user_input:
+    st.chat_message("user").write(user_input)
+
+    # Run event loop inside Streamlit
+    loop = asyncio.new_event_loop()
+    add_script_run_ctx(loop)
+    loop.run_until_complete(handle_agent_stream(user_input))
